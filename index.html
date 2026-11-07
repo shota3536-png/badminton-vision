@@ -1,144 +1,253 @@
-<!DOCTYPE html>  
-<html lang="ja">  
-<head>  
-  <meta charset="UTF-8">  
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">  
-  <title>AI Form Analyzer</title>  
-  <script src="https://cdn.tailwindcss.com"></script>  
-  <!-- MediaPipe Pose -->  
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>  
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>  
-</head>  
-<body class="bg-gray-900 text-white min-h-screen flex flex-col items-center p-4">  
-  <div class="w-full max-w-md">  
-    <h1 class="text-xl font-bold mb-4 text-center">AI スマッシュ解析</h1>  
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>AI Form & Speed Analyzer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- MediaPipe Pose -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen flex flex-col items-center p-4">
+  <div class="w-full max-w-md">
+    <h1 class="text-xl font-bold mb-4 text-center">AI スマッシュ解析</h1>
+    
+    <!-- 動画アップロード -->
+    <div class="mb-2">
+      <input type="file" id="videoUpload" accept="video/mp4,video/x-m4v,video/*" class="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700">
+    </div>
+
+    <!-- コマ送り・再生コントロール -->
+    <div class="flex justify-between items-center bg-gray-800 p-2 rounded-t-lg">
+      <button id="btn-05" class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-xs">-0.05s</button>
+      <button id="btn-01" class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-xs">-0.01s</button>
+      <button id="btnPlayPause" class="bg-blue-600 hover:bg-blue-500 px-4 py-1 rounded text-sm font-bold">再生 / 停止</button>
+      <button id="btn+01" class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-xs">+0.01s</button>
+      <button id="btn+05" class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-xs">+0.05s</button>
+    </div>
+
+    <!-- プレビューとAI描画エリア -->
+    <div class="relative bg-black rounded-b-lg overflow-hidden w-full aspect-[9/16] flex items-center justify-center border border-gray-700 border-t-0">
+      <div id="loadingMessage" class="absolute inset-0 flex flex-col items-center justify-center bg-black/80 z-20 hidden">
+        <div class="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-2"></div>
+        <p class="text-white text-sm">動画を読み込み中...</p>
+      </div>
+      <!-- controlsを外し、canvasのpointer-events-noneを外してタップ可能に -->
+      <video id="inputVideo" class="absolute w-full h-full object-contain" playsinline webkit-playsinline muted></video>
+      <canvas id="outputCanvas" class="absolute w-full h-full object-contain z-10 cursor-crosshair"></canvas>
+    </div>
+
+    <!-- 速度計算パネル -->
+    <div class="mt-4 p-4 bg-gray-800 rounded-lg border border-blue-900 shadow-lg">
+      <h2 class="text-sm font-bold mb-3 text-center text-blue-300">🏸 シャトル速度計算モード</h2>
+      <p id="speedStatus" class="text-sm text-yellow-400 text-center mb-3 font-bold">1. コマ送りで「打つ瞬間」を探し、動画をタップ</p>
+      <div class="flex justify-between items-center text-sm mb-3">
+        <label class="text-gray-300">推定飛距離 (m):</label>
+        <input type="number" id="distanceInput" value="5.0" step="0.1" class="w-16 bg-gray-700 text-center text-white rounded p-1 border border-gray-600">
+      </div>
+      <div class="flex justify-between items-center">
+        <button id="btnResetSpeed" class="bg-red-600 hover:bg-red-700 px-3 py-1 rounded text-sm">やり直す</button>
+        <div class="text-right">
+          <div class="text-xs text-gray-400">推定初速</div>
+          <div class="text-2xl font-bold text-blue-400"><span id="speedResult">---</span> <span class="text-sm text-gray-300">km/h</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 角度データ表示 -->
+    <div id="angleDisplay" class="mt-4 p-4 bg-gray-800 rounded-lg hidden">
+      <h2 class="text-sm font-bold mb-2 text-center text-gray-300">現在の関節角度</h2>
+      <div class="grid grid-cols-2 gap-4">
+        <div class="bg-gray-700 p-2 rounded text-center">
+          <div class="text-xs text-gray-400">右ひじ</div>
+          <div id="elbowAngle" class="text-xl font-bold text-green-400">-°</div>
+        </div>
+        <div class="bg-gray-700 p-2 rounded text-center">
+          <div class="text-xs text-gray-400">右ひざ</div>
+          <div id="kneeAngle" class="text-xl font-bold text-green-400">-°</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const videoElement = document.getElementById('inputVideo');
+    const canvasElement = document.getElementById('outputCanvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    const videoUpload = document.getElementById('videoUpload');
+    const loadingMessage = document.getElementById('loadingMessage');
+    const angleDisplay = document.getElementById('angleDisplay');
+    const elbowAngleEl = document.getElementById('elbowAngle');
+    const kneeAngleEl = document.getElementById('kneeAngle');
+
+    // === 速度計算用変数 ===
+    let tapPoints = [];
+    let tapTimes = [];
+
+    // === 動画コントロール ===
+    const shiftTime = (delta) => {
+      if (videoElement.readyState >= 2) {
+        videoElement.currentTime += delta;
+      }
+    };
+    document.getElementById('btn-05').onclick = () => shiftTime(-0.05);
+    document.getElementById('btn-01').onclick = () => shiftTime(-0.01);
+    document.getElementById('btn+01').onclick = () => shiftTime(0.01);
+    document.getElementById('btn+05').onclick = () => shiftTime(0.05);
+    
+    document.getElementById('btnPlayPause').onclick = () => {
+      if (videoElement.paused) videoElement.play();
+      else videoElement.pause();
+    };
+
+    // === AIモデル初期設定 ===
+    const pose = new Pose({locateFile: (file) => {
+      return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
+    }});
+    pose.setOptions({
+      modelComplexity: 1,
+      smoothLandmarks: true,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    function calculateAngle(a, b, c) {
+      const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+      let angle = Math.abs(radians * 180.0 / Math.PI);
+      if (angle > 180.0) angle = 360.0 - angle;
+      return angle;
+    }
+
+    // === AI描画 ＆ タップマーカー描画 ===
+    pose.onResults((results) => {
+      canvasCtx.save();
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
       
-    <!-- 動画アップロード -->  
-    <div class="mb-4">  
-      <input type="file" id="videoUpload" accept="video/mp4,video/x-m4v,video/*" class="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700">  
-    </div>  
-  
-    <!-- プレビューとAI描画エリア -->  
-    <div class="relative bg-black rounded-lg overflow-hidden w-full aspect-[9/16] flex items-center justify-center border border-gray-700">  
-      <div id="loadingMessage" class="absolute inset-0 flex flex-col items-center justify-center bg-black/80 z-20 hidden">  
-        <div class="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-2"></div>  
-        <p class="text-white text-sm">動画を読み込み中...</p>  
-      </div>  
-      <!-- 修正ポイント: playsinline と muted を追加してスマホでの再生を許可 -->  
-      <video id="inputVideo" class="absolute w-full h-full object-contain" playsinline webkit-playsinline muted controls></video>  
-      <canvas id="outputCanvas" class="absolute w-full h-full object-contain pointer-events-none z-10"></canvas>  
-    </div>  
-  
-    <!-- 角度データ表示 -->  
-    <div id="angleDisplay" class="mt-4 p-4 bg-gray-800 rounded-lg hidden">  
-      <h2 class="text-sm font-bold mb-2 text-center text-gray-300">現在の関節角度</h2>  
-      <div class="grid grid-cols-2 gap-4">  
-        <div class="bg-gray-700 p-2 rounded text-center">  
-          <div class="text-xs text-gray-400">右ひじ</div>  
-          <div id="elbowAngle" class="text-xl font-bold text-green-400">-°</div>  
-        </div>  
-        <div class="bg-gray-700 p-2 rounded text-center">  
-          <div class="text-xs text-gray-400">右ひざ</div>  
-          <div id="kneeAngle" class="text-xl font-bold text-green-400">-°</div>  
-        </div>  
-      </div>  
-    </div>  
-  </div>  
-  
-  <script>  
-    const videoElement = document.getElementById('inputVideo');  
-    const canvasElement = document.getElementById('outputCanvas');  
-    const canvasCtx = canvasElement.getContext('2d');  
-    const videoUpload = document.getElementById('videoUpload');  
-    const loadingMessage = document.getElementById('loadingMessage');  
-    const angleDisplay = document.getElementById('angleDisplay');  
-    const elbowAngleEl = document.getElementById('elbowAngle');  
-    const kneeAngleEl = document.getElementById('kneeAngle');  
-  
-    // AIモデル（MediaPipe Pose）の初期設定  
-    const pose = new Pose({locateFile: (file) => {  
-      return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;  
-    }});  
-  
-    pose.setOptions({  
-      modelComplexity: 1,  
-      smoothLandmarks: true,  
-      minDetectionConfidence: 0.5,  
-      minTrackingConfidence: 0.5  
-    });  
-  
-    // 3点から角度を計算する関数  
-    function calculateAngle(a, b, c) {  
-      const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);  
-      let angle = Math.abs(radians * 180.0 / Math.PI);  
-      if (angle > 180.0) angle = 360.0 - angle;  
-      return angle;  
-    }  
-  
-    // AIの推論結果が返ってきたときの描画処理  
-    pose.onResults((results) => {  
-      canvasCtx.save();  
-      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);  
+      // 骨格の描画
+      if (results.poseLandmarks) {
+        angleDisplay.classList.remove('hidden');
+        drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 3});
+        drawLandmarks(canvasCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 1, radius: 3});
+
+        const shoulder = results.poseLandmarks[12];
+        const elbow = results.poseLandmarks[14];
+        const wrist = results.poseLandmarks[16];
+        if(shoulder && elbow && wrist) {
+           elbowAngleEl.innerText = Math.round(calculateAngle(shoulder, elbow, wrist)) + '°';
+        }
+
+        const hip = results.poseLandmarks[24];
+        const knee = results.poseLandmarks[26];
+        const ankle = results.poseLandmarks[28];
+        if(hip && knee && ankle) {
+           kneeAngleEl.innerText = Math.round(calculateAngle(hip, knee, ankle)) + '°';
+        }
+      }
+
+      // タップした点（打点・着弾点）と軌跡の描画
+      if (tapPoints.length > 0) {
+        // 打点（黄色）
+        canvasCtx.fillStyle = '#FFFF00';
+        canvasCtx.beginPath();
+        canvasCtx.arc(tapPoints[0].x, tapPoints[0].y, 8, 0, 2 * Math.PI);
+        canvasCtx.fill();
         
-      if (results.poseLandmarks) {  
-        angleDisplay.classList.remove('hidden');  
-  
-        // 骨格の線と点を描画  
-        drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 3});  
-        drawLandmarks(canvasCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 1, radius: 3});  
-  
-        // 12:右肩, 14:右ひじ, 16:右手首 の角度  
-        const shoulder = results.poseLandmarks[12];  
-        const elbow = results.poseLandmarks[14];  
-        const wrist = results.poseLandmarks[16];  
-        if(shoulder && elbow && wrist) {  
-           elbowAngleEl.innerText = Math.round(calculateAngle(shoulder, elbow, wrist)) + '°';  
-        }  
-  
-        // 24:右腰, 26:右ひざ, 28:右足首 の角度  
-        const hip = results.poseLandmarks[24];  
-        const knee = results.poseLandmarks[26];  
-        const ankle = results.poseLandmarks[28];  
-        if(hip && knee && ankle) {  
-           kneeAngleEl.innerText = Math.round(calculateAngle(hip, knee, ankle)) + '°';  
-        }  
-      }  
-      canvasCtx.restore();  
-    });  
-  
-    // 動画ファイルが選択された時の処理  
-    videoUpload.addEventListener('change', (event) => {  
-      const file = event.target.files[0];  
-      if (!file) return;  
-  
-      loadingMessage.classList.remove('hidden');  
-      const fileURL = URL.createObjectURL(file);  
-      videoElement.src = fileURL;  
-        
-      // 動画のメタデータ（サイズなど）が読み込まれたらキャンバスサイズを合わせる  
-      videoElement.onloadedmetadata = () => {  
-        canvasElement.width = videoElement.videoWidth;  
-        canvasElement.height = videoElement.videoHeight;  
-        loadingMessage.classList.add('hidden');  
-      };  
-    });  
-  
-    // 再生中の動画フレームをAIに送り続けるループ処理  
-    let processVideo = async () => {  
-      if (!videoElement.paused && !videoElement.ended) {  
-        await pose.send({image: videoElement});  
-        requestAnimationFrame(processVideo);  
-      }  
-    };  
-  
-    videoElement.addEventListener('play', () => {  
-      processVideo();  
-    });  
+        // 着弾点（シアン）と点線
+        if (tapPoints.length > 1) {
+          canvasCtx.fillStyle = '#00FFFF';
+          canvasCtx.beginPath();
+          canvasCtx.arc(tapPoints[1].x, tapPoints[1].y, 8, 0, 2 * Math.PI);
+          canvasCtx.fill();
+          
+          canvasCtx.strokeStyle = '#FFFFFF';
+          canvasCtx.lineWidth = 3;
+          canvasCtx.setLineDash([10, 10]);
+          canvasCtx.beginPath();
+          canvasCtx.moveTo(tapPoints[0].x, tapPoints[0].y);
+          canvasCtx.lineTo(tapPoints[1].x, tapPoints[1].y);
+          canvasCtx.stroke();
+          canvasCtx.setLineDash([]);
+        }
+      }
+      canvasCtx.restore();
+    });
+
+    // === タップによる座標・時間取得 ===
+    canvasElement.addEventListener('click', (e) => {
+      if (tapPoints.length >= 2 || !videoElement.src) return;
+
+      const rect = canvasElement.getBoundingClientRect();
+      const scaleX = canvasElement.width / rect.width;
+      const scaleY = canvasElement.height / rect.height;
+      const x = (e.clientX - rect.left) * scaleX;
+      const y = (e.clientY - rect.top) * scaleY;
       
-    // シーク（手動で再生位置を動かした時）にもAIを再計算  
-    videoElement.addEventListener('seeked', async () => {  
-        await pose.send({image: videoElement});  
-    });  
-  </script>  
-</body>  
-</html>  
+      tapPoints.push({x, y});
+      tapTimes.push(videoElement.currentTime);
+      
+      updateSpeedUI();
+      // 強制再描画
+      if (videoElement.paused) pose.send({image: videoElement});
+    });
+
+    // === 速度計算ロジック ===
+    function updateSpeedUI() {
+      const statusEl = document.getElementById('speedStatus');
+      const resultEl = document.getElementById('speedResult');
+      const dist = parseFloat(document.getElementById('distanceInput').value) || 5.0;
+
+      if (tapPoints.length === 0) {
+        statusEl.innerText = "1. コマ送りで「打つ瞬間」を探し、動画をタップ";
+        resultEl.innerText = "---";
+      } else if (tapPoints.length === 1) {
+        statusEl.innerText = "2. コマ送りで「着弾の瞬間」を探し、動画をタップ";
+        resultEl.innerText = "---";
+      } else if (tapPoints.length === 2) {
+        statusEl.innerText = "✅ 計算完了！";
+        const timeDiff = Math.abs(tapTimes[1] - tapTimes[0]);
+        if (timeDiff > 0) {
+          const v_mps = dist / timeDiff;
+          let v_kmh = v_mps * 3.6;
+          // ※バドミントンの初速は空気抵抗で急激に落ちるため、平均速度の約1.6倍を推定初速として計算
+          v_kmh = v_kmh * 1.6;
+          resultEl.innerText = Math.round(v_kmh);
+        } else {
+          resultEl.innerText = "ERR";
+        }
+      }
+    }
+
+    document.getElementById('btnResetSpeed').onclick = () => {
+      tapPoints = [];
+      tapTimes = [];
+      updateSpeedUI();
+      if (videoElement.paused) pose.send({image: videoElement});
+    };
+
+    // === 動画アップロード ＆ ループ処理 ===
+    videoUpload.addEventListener('change', (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      loadingMessage.classList.remove('hidden');
+      videoElement.src = URL.createObjectURL(file);
+      
+      videoElement.onloadedmetadata = () => {
+        canvasElement.width = videoElement.videoWidth;
+        canvasElement.height = videoElement.videoHeight;
+        loadingMessage.classList.add('hidden');
+      };
+    });
+
+    let processVideo = async () => {
+      if (!videoElement.paused && !videoElement.ended) {
+        await pose.send({image: videoElement});
+        requestAnimationFrame(processVideo);
+      }
+    };
+    videoElement.addEventListener('play', () => processVideo());
+    videoElement.addEventListener('seeked', async () => await pose.send({image: videoElement}));
+  </script>
+</body>
+</html>
